@@ -1,3 +1,6 @@
+This Repo is no longer needed just keeping it right now for book keeping
+THIS APP NOW DOWNLOADS WITH SOULLESS-LAUNCHER NO NEED TO DOWNLOAD THIS
+
 # Soulless Applet
 
 launcher button
