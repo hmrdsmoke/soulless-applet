@@ -77,7 +77,7 @@ impl cosmic::Application for AppModel {
         let button = self
             .core
             .applet
-            .icon_button("display-symbolic")
+            .icon_button("com.github.hmrdsmoke.soulless-applet")
             .on_press_down(Message::OpenLauncher);
 
         Element::from(self.core.applet.applet_tooltip(
