@@ -7,6 +7,7 @@ description = "launcher button"
 repository = "https://github.com/hmrdsmoke/soulless-applet"
 
 [dependencies]
+soulless-organizer = { path = "../organizer" }
 futures-util = "0.3.31"
 zbus         = { version = "5", features = ["tokio"] }
 i18n-embed-fl = "0.10"
@@ -18,7 +19,8 @@ version = "0.16"
 features = ["fluent-system", "desktop-requester"]
 
 [dependencies.libcosmic]
-git = "https://github.com/pop-os/libcosmic.git"
+git = "https://github.com/pop-os/libcosmic"
+branch = "master"
 # See https://github.com/pop-os/libcosmic/blob/master/Cargo.toml for available features.
 features = [
     # Applet support

@@ -16,6 +16,8 @@ pub struct AppModel {
     popup: Option<Id>,
     /// Configuration data that persists between application runs.
     config: Config,
+    /// File organizer state
+    organizer: soulless_organizer::OrganizerState,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -26,6 +28,7 @@ pub enum Message {
     Surface(cosmic::surface::Action),
     UpdateConfig(Config),
     DbusActivate,
+    Organizer(soulless_organizer::Message),
 }
 
 /// Create a COSMIC application from the app model
@@ -98,12 +101,18 @@ impl cosmic::Application for AppModel {
                 .map(|update| Message::UpdateConfig(update.config)),
             crate::dbus::subscription()
                 .map(|_| Message::DbusActivate),
+            soulless_organizer::subscription()
+                .map(Message::Organizer),
         ])
     }
 
     /// Handles messages emitted by the application and its widgets.
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
+            Message::Organizer(msg) => {
+                self.organizer.update(msg);
+                Task::none()
+            }
             Message::UpdateConfig(config) => {
                 self.config = config;
                 Task::none()
