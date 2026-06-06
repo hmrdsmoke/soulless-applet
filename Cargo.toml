@@ -2,7 +2,7 @@
 name = "soulless-applet"
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "launcher button"
 repository = "https://github.com/hmrdsmoke/soulless-applet"
 

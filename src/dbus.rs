@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 // DBus interface for the Soulless applet.
 
 use cosmic::iced::Subscription;
