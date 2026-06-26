@@ -2,8 +2,11 @@
 
 use crate::config::Config;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
-use cosmic::iced::{window::Id, Subscription};
+use cosmic::iced::{window::Id, Rectangle, Subscription};
 use cosmic::prelude::*;
+use cosmic::widget::rectangle_tracker::{
+    rectangle_tracker_subscription, RectangleTracker, RectangleUpdate,
+};
 use std::process::{Command, Stdio};
 
 /// The application model stores app-specific state used to describe its interface and
@@ -18,6 +21,10 @@ pub struct AppModel {
     config: Config,
     /// File organizer state
     organizer: soulless_organizer::OrganizerState,
+    /// Tracks the applet button's on-screen rectangle (for launcher anchoring).
+    rectangle_tracker: Option<RectangleTracker<u32>>,
+    /// The applet button's current rectangle, if known.
+    rectangle: Option<Rectangle>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -28,6 +35,7 @@ pub enum Message {
     Surface(cosmic::surface::Action),
     UpdateConfig(Config),
     DbusActivate,
+    Rectangle(RectangleUpdate<u32>),
     Organizer(soulless_organizer::Message),
 }
 
@@ -84,8 +92,17 @@ impl cosmic::Application for AppModel {
             .icon_button("com.github.hmrdsmoke.soulless-applet")
             .on_press_down(Message::OpenLauncher);
 
+        // Wrap the button in the rectangle tracker so we learn its on-screen
+        // position; used to anchor the launcher under the button.
+        let tracked: Element<'_, Self::Message> =
+            if let Some(tracker) = self.rectangle_tracker.as_ref() {
+                tracker.container(0, button).into()
+            } else {
+                button.into()
+            };
+
         Element::from(self.core.applet.applet_tooltip(
-            button,
+            tracked,
             "soulless-launcher",
             false,
             Message::Surface,
@@ -103,6 +120,8 @@ impl cosmic::Application for AppModel {
                 .map(|_| Message::DbusActivate),
             soulless_organizer::subscription()
                 .map(Message::Organizer),
+            rectangle_tracker_subscription(0)
+                .map(|update| Message::Rectangle(update.1)),
         ])
     }
 
@@ -115,6 +134,18 @@ impl cosmic::Application for AppModel {
             }
             Message::UpdateConfig(config) => {
                 self.config = config;
+                Task::none()
+            }
+            Message::Rectangle(u) => {
+                match u {
+                    RectangleUpdate::Rectangle(r) => {
+                        self.rectangle = Some(r.1);
+                        eprintln!("[APPLET RECT] {:?}", self.rectangle);
+                    }
+                    RectangleUpdate::Init(tracker) => {
+                        self.rectangle_tracker.replace(tracker);
+                    }
+                }
                 Task::none()
             }
             Message::OpenLauncher => {
