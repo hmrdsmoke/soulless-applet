@@ -49,12 +49,7 @@ pub fn subscription() -> Subscription<DbusMessage> {
                         }
                     }
                     Step::Running { _conn, mut rx } => {
-                        match rx.recv().await {
-                            Some(msg) => {
-                                Some((Some(msg), Step::Running { _conn, rx }))
-                            }
-                            None => None,
-                        }
+                        rx.recv().await.map(|msg| (Some(msg), Step::Running { _conn, rx }))
                     }
                     Step::Dead => {
                         futures_util::future::pending::<()>().await;
