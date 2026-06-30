@@ -37,7 +37,6 @@ pub enum Message {
     PopupClosed(Id),
     Surface(cosmic::surface::Action),
     UpdateConfig(Config),
-    DbusActivate,
     Rectangle(RectangleUpdate<u32>),
     Organizer(soulless_organizer::Message),
 }
@@ -119,8 +118,6 @@ impl cosmic::Application for AppModel {
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
                 .map(|update| Message::UpdateConfig(update.config)),
-            crate::dbus::subscription()
-                .map(|_| Message::DbusActivate),
             soulless_organizer::subscription()
                 .map(Message::Organizer),
             rectangle_tracker_subscription(0)
@@ -197,17 +194,6 @@ impl cosmic::Application for AppModel {
             Message::Surface(action) => cosmic::task::message(cosmic::Action::Cosmic(
                 cosmic::app::Action::Surface(action),
             )),
-            Message::DbusActivate => {
-                if let Err(err) = Command::new("soulless-launcher")
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                {
-                    eprintln!("failed to launch soulless-launcher: {err}");
-                }
-                Task::none()
-            }
             Message::PopupClosed(id) => {
                 if self.popup.as_ref() == Some(&id) {
                     self.popup = None;
