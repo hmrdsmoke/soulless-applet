@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 mod app;
-mod dbus;
 mod config;
 mod i18n;
 

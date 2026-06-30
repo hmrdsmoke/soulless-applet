@@ -7,7 +7,6 @@ use cosmic::prelude::*;
 use cosmic::widget::rectangle_tracker::{
     rectangle_tracker_subscription, RectangleTracker, RectangleUpdate,
 };
-use std::process::{Command, Stdio};
 
 /// The application model stores app-specific state used to describe its interface and
 /// drive its logic.
