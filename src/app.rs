@@ -31,6 +31,9 @@ pub struct AppModel {
 #[derive(Debug, Clone)]
 pub enum Message {
     OpenLauncher,
+    /// No-op: returned by async Tasks (e.g. the D-Bus activate) that have no
+    /// follow-up message. Handled as Task::none().
+    Noop,
     PopupClosed(Id),
     Surface(cosmic::surface::Action),
     UpdateConfig(Config),
@@ -149,17 +152,48 @@ impl cosmic::Application for AppModel {
                 Task::none()
             }
             Message::OpenLauncher => {
-                if let Err(err) = Command::new("soulless-launcher")
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                {
-                    eprintln!("failed to launch soulless-launcher: {err}");
-                }
-
-                Task::none()
+                // Button press -> activate the resident launcher daemon by calling
+                // its org.freedesktop.DbusActivation.Activate method over the
+                // session bus, IN-PROCESS. No child process is spawned, so there
+                // is no unreaped child and no zombie (earlier spawn-based versions
+                // leaked a defunct process per click because the applet never
+                // wait()s on its children). Empty a{sv} platform-data arg matches
+                // the method signature (busctl's `"a{sv}" 0`). Breadcrumbs prefixed
+                // "[applet] activate:" so failures are greppable in the journal.
+                cosmic::task::future(async move {
+                    use std::collections::HashMap;
+                    use zbus::zvariant::Value;
+                    let platform_data: HashMap<String, Value> = HashMap::new();
+                    match zbus::Connection::session().await {
+                        Ok(conn) => {
+                            match conn
+                                .call_method(
+                                    Some("com.github.hmrdsmoke.SoullessLauncher"),
+                                    "/com/github/hmrdsmoke/SoullessLauncher",
+                                    Some("org.freedesktop.DbusActivation"),
+                                    "Activate",
+                                    &platform_data,
+                                )
+                                .await
+                            {
+                                Ok(_) => {
+                                    eprintln!("[applet] activate: sent to SoullessLauncher");
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "[applet] activate: call to SoullessLauncher failed: {e}"
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[applet] activate: session bus connection failed: {e}");
+                        }
+                    }
+                    Message::Noop
+                })
             }
+            Message::Noop => Task::none(),
             Message::Surface(action) => cosmic::task::message(cosmic::Action::Cosmic(
                 cosmic::app::Action::Surface(action),
             )),
