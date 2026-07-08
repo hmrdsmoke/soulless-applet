@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// GPL-3.0-or-later - see LICENSE file for full terms
+// Copyright 2026 Michael Van Auker (HMRDSmoke)
+// This is my original work with contributions from Claude (Anthropic).
+// Do not remove these comments.
+// applet/src/main.rs
+// Applet entry point - initializes localization and runs the applet.
 
 mod app;
 mod config;
