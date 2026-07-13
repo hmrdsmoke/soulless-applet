@@ -185,6 +185,12 @@ impl cosmic::Application for AppModel {
                                     eprintln!(
                                         "[applet] activate: call to SoullessLauncher failed: {e}"
                                     );
+                                    // Nobody owns the name -> no daemon yet. Spawn one
+                                    // ourselves, handing it the panel's privileged socket
+                                    // so it inherits the CosmicPanel security-context and
+                                    // can actually see zwlr_layer_shell_v1. Spawned ONCE
+                                    // (guarded), and reaped so no zombie is left behind.
+                                    crate::app::spawn_launcher_once();
                                 }
                             }
                         }
@@ -211,5 +217,74 @@ impl cosmic::Application for AppModel {
 
     fn style(&self) -> Option<cosmic::iced::theme::Style> {
         Some(cosmic::applet::style())
+    }
+}
+// ── Launcher spawn (privileged-socket handoff) ───────────────────────────────
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// One spawn per applet lifetime. Two applets (panel + dock) each hold their
+/// own privileged fd; whichever spawns first wins the D-Bus name, and the
+/// other's Activate then succeeds normally — so no second launcher survives.
+static SPAWNED: AtomicBool = AtomicBool::new(false);
+
+/// Spawn the launcher daemon on the panel's privileged Wayland socket.
+///
+/// WAYLAND_SOCKET (an inherited, already-connected fd) is the standard
+/// pre-connected-socket mechanism; the child connects through it and therefore
+/// wears the panel's `com.system76.CosmicPanel` security-context — the identity
+/// cosmic-comp exempts from protocol filtering. Without this the launcher sees
+/// 35 globals instead of 56, no layer-shell, and its window never maps.
+///
+/// The fd must have CLOEXEC cleared or exec() closes it out from under the child.
+pub fn spawn_launcher_once() {
+    if SPAWNED.swap(true, Ordering::SeqCst) {
+        eprintln!("[applet] spawn: already spawned once this session, skipping");
+        return;
+    }
+
+    let Some(Some(fd)) = crate::PRIVILEGED_FD.get().copied() else {
+        eprintln!("[applet] spawn: no privileged fd — cannot give the launcher layer-shell; not spawning");
+        SPAWNED.store(false, Ordering::SeqCst);
+        return;
+    };
+
+    // Clear CLOEXEC so the fd survives exec into the child.
+    // SAFETY: fd is owned by this process and valid for its lifetime.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFD);
+        if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
+            eprintln!("[applet] spawn: failed to clear CLOEXEC on fd {fd}");
+            SPAWNED.store(false, Ordering::SeqCst);
+            return;
+        }
+    }
+
+    // In-flatpak the launcher lives at /app/bin; native, it's on PATH.
+    let exe = if std::path::Path::new("/app/bin/soulless-launcher").exists() {
+        "/app/bin/soulless-launcher"
+    } else {
+        "soulless-launcher"
+    };
+
+    let mut cmd = std::process::Command::new(exe);
+    cmd.env("WAYLAND_SOCKET", fd.to_string());
+    // The child must NOT also see WAYLAND_DISPLAY, or it may prefer the
+    // unprivileged socket and land right back in the filtered registry.
+    cmd.env_remove("WAYLAND_DISPLAY");
+
+    match cmd.spawn() {
+        Ok(mut child) => {
+            eprintln!("[applet] spawn: launched {exe} pid={} on privileged fd {fd}", child.id());
+            // Reap in the background — no zombies (the defunct-process bug).
+            std::thread::spawn(move || {
+                let _ = child.wait();
+                eprintln!("[applet] spawn: launcher exited");
+            });
+        }
+        Err(e) => {
+            eprintln!("[applet] spawn: failed to launch {exe}: {e}");
+            SPAWNED.store(false, Ordering::SeqCst);
+        }
     }
 }
