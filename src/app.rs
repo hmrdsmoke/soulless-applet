@@ -96,7 +96,11 @@ impl cosmic::Application for AppModel {
         let button = self
             .core
             .applet
-            .icon_button("com.github.hmrdsmoke.soulless-applet")
+            // Launcher's icon name, not the applet's: the flatpak only exports
+            // icons prefixed with the app ID (com.github.hmrdsmoke.soulless-launcher),
+            // so an applet-named icon can never reach the host or the sandbox
+            // theme. Same art; the desktop entry already uses this name.
+            .icon_button("com.github.hmrdsmoke.soulless-launcher")
             .on_press_down(Message::OpenLauncher);
 
         // Wrap the button in the rectangle tracker so we learn its on-screen
