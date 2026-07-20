@@ -199,37 +199,12 @@ impl cosmic::Application for AppModel {
                                     eprintln!(
                                         "[applet] activate: call to SoullessLauncher failed: {e}"
                                     );
-                                    // Nobody owns the name -> no daemon (prewarm lost, or
-                                    // the launcher crashed). Spawn one and RETRY the
-                                    // Activate until the name comes up — without this the
-                                    // click that resurrects the daemon does nothing
-                                    // visible and the user must click twice. Bounded:
-                                    // 10 x 200ms covers a cold start (index load ~1s)
-                                    // with headroom; if the daemon still is not up,
-                                    // something is wrong beyond what a retry fixes.
+                                    // Nobody owns the name -> no daemon yet. Spawn one
+                                    // ourselves, handing it the panel's privileged socket
+                                    // so it inherits the CosmicPanel security-context and
+                                    // can actually see zwlr_layer_shell_v1. Spawned ONCE
+                                    // (guarded), and reaped so no zombie is left behind.
                                     crate::app::spawn_launcher_once();
-                                    for attempt in 1..=10u32 {
-                                        tokio::time::sleep(
-                                            std::time::Duration::from_millis(200),
-                                        )
-                                        .await;
-                                        if conn
-                                            .call_method(
-                                                Some("com.github.hmrdsmoke.SoullessLauncher"),
-                                                "/com/github/hmrdsmoke/SoullessLauncher",
-                                                Some("org.freedesktop.DbusActivation"),
-                                                "Activate",
-                                                &platform_data,
-                                            )
-                                            .await
-                                            .is_ok()
-                                        {
-                                            eprintln!(
-                                                "[applet] activate: sent after spawn (attempt {attempt})"
-                                            );
-                                            break;
-                                        }
-                                    }
                                 }
                             }
                         }
