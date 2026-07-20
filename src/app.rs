@@ -227,12 +227,14 @@ impl cosmic::Application for AppModel {
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// One spawn per applet lifetime. Two applets (panel + dock) each hold their
-/// own privileged fd; whichever spawns first wins the D-Bus name, and the
-/// other's Activate then succeeds normally — so no second launcher survives.
+/// At most one live child per applet. Set on spawn, reset when the child
+/// exits (see the waiter thread) so a crashed launcher can be respawned.
+/// Two applets (panel + dock) may both spawn in the boot race; the loser
+/// forwards "warm" to the winner and exits — no second launcher survives.
 static SPAWNED: AtomicBool = AtomicBool::new(false);
 
-/// Spawn the launcher daemon on the panel's privileged Wayland socket.
+/// Spawn the launcher daemon — always with the "warm" token, and on the
+/// panel's privileged Wayland socket when sandboxed (native needs no fd).
 ///
 /// WAYLAND_SOCKET (an inherited, already-connected fd) is the standard
 /// pre-connected-socket mechanism; the child connects through it and therefore
@@ -243,24 +245,26 @@ static SPAWNED: AtomicBool = AtomicBool::new(false);
 /// The fd must have CLOEXEC cleared or exec() closes it out from under the child.
 pub fn spawn_launcher_once() {
     if SPAWNED.swap(true, Ordering::SeqCst) {
-        eprintln!("[applet] spawn: already spawned once this session, skipping");
+        eprintln!("[applet] spawn: launcher already alive (or spawning), skipping");
         return;
     }
 
-    let Some(Some(fd)) = crate::PRIVILEGED_FD.get().copied() else {
-        eprintln!("[applet] spawn: no privileged fd — cannot give the launcher layer-shell; not spawning");
-        SPAWNED.store(false, Ordering::SeqCst);
-        return;
-    };
+    // The privileged fd is a sandbox concern: cosmic-comp filters the sandboxed
+    // registry, so in-flatpak the child must inherit the panel's socket to see
+    // layer-shell. Native is unfiltered — no fd exists and none is needed; the
+    // child connects via WAYLAND_DISPLAY like any process.
+    let fd = crate::PRIVILEGED_FD.get().copied().flatten();
 
-    // Clear CLOEXEC so the fd survives exec into the child.
-    // SAFETY: fd is owned by this process and valid for its lifetime.
-    unsafe {
-        let flags = libc::fcntl(fd, libc::F_GETFD);
-        if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
-            eprintln!("[applet] spawn: failed to clear CLOEXEC on fd {fd}");
-            SPAWNED.store(false, Ordering::SeqCst);
-            return;
+    if let Some(fd) = fd {
+        // Clear CLOEXEC so the fd survives exec into the child.
+        // SAFETY: fd is owned by this process and valid for its lifetime.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
+                eprintln!("[applet] spawn: failed to clear CLOEXEC on fd {fd}");
+                SPAWNED.store(false, Ordering::SeqCst);
+                return;
+            }
         }
     }
 
@@ -272,18 +276,31 @@ pub fn spawn_launcher_once() {
     };
 
     let mut cmd = std::process::Command::new(exe);
-    cmd.env("WAYLAND_SOCKET", fd.to_string());
-    // The child must NOT also see WAYLAND_DISPLAY, or it may prefer the
-    // unprivileged socket and land right back in the filtered registry.
-    cmd.env_remove("WAYLAND_DISPLAY");
+    // "warm": start the daemon WITHOUT showing the window. Also the race
+    // token — when two applets spawn simultaneously at boot, the
+    // run_single_instance loser forwards "warm" to the winner (a no-op).
+    // A bare spawn would forward Activate and pop the window open.
+    cmd.arg("warm");
+    if let Some(fd) = fd {
+        cmd.env("WAYLAND_SOCKET", fd.to_string());
+        // The child must NOT also see WAYLAND_DISPLAY, or it may prefer the
+        // unprivileged socket and land right back in the filtered registry.
+        cmd.env_remove("WAYLAND_DISPLAY");
+    }
 
     match cmd.spawn() {
         Ok(mut child) => {
-            eprintln!("[applet] spawn: launched {exe} pid={} on privileged fd {fd}", child.id());
-            // Reap in the background — no zombies (the defunct-process bug).
+            match fd {
+                Some(fd) => eprintln!("[applet] spawn: launched {exe} pid={} on privileged fd {fd}", child.id()),
+                None => eprintln!("[applet] spawn: launched {exe} pid={} on WAYLAND_DISPLAY (native)", child.id()),
+            }
+            // Reap in the background — no zombies (the defunct-process bug) —
+            // and reset the guard on exit so the next click can resurrect a
+            // crashed launcher instead of facing a dead session.
             std::thread::spawn(move || {
                 let _ = child.wait();
-                eprintln!("[applet] spawn: launcher exited");
+                eprintln!("[applet] spawn: launcher exited — guard reset for respawn");
+                SPAWNED.store(false, Ordering::SeqCst);
             });
         }
         Err(e) => {
