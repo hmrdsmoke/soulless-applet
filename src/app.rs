@@ -83,8 +83,18 @@ impl cosmic::Application for AppModel {
                 .unwrap_or_default(),
             ..Default::default()
         };
-
-        (app, Task::none())
+        // Prewarm: ensure the launcher daemon exists from second one of the
+        // session, so the first click (or Super+Space) lands on a warm daemon
+        // instead of paying the cold start — and so a cold `toggle` from the
+        // shortcut never becomes an unprivileged daemon squatting the name.
+        // Deferred to a task so PRIVILEGED_FD (claimed in main before run) is
+        // read after init, same as the click path. "warm" makes the two-panel
+        // race benign; see spawn_launcher_once.
+        let prewarm = cosmic::task::future(async move {
+            spawn_launcher_once();
+            Message::Noop
+        });
+        (app, prewarm)
     }
 
     fn on_close_requested(&self, id: Id) -> Option<Message> {
